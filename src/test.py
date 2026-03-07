@@ -1,16 +1,15 @@
-
 from .crop import *
 from .loss import *
 from .load_data import *
 from .neuronnes import *
 
-from .train import stn_warp
+from .train import stn_warp, reconstruct_with_overlap
 
 
 @tf.function
-def test_step(model,vis_image, ir_image, patch_size_vis):
+def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     """
-    Test step amélioré avec toutes les métriques de validation
+    Test step avec overlap identique au train_step
     """
     # Convertir RGB en grayscale
     vis_gray = tf.reduce_mean(vis_image, axis=-1, keepdims=True)
@@ -34,14 +33,17 @@ def test_step(model,vis_image, ir_image, patch_size_vis):
     # Normaliser comme dans train_step
     vis_gray_norm = (vis_gray - tf.reduce_mean(vis_gray)) / (tf.math.reduce_std(vis_gray) + 1e-8)
     ir_gray_norm = (ir_gray - tf.reduce_mean(ir_gray)) / (tf.math.reduce_std(ir_gray) + 1e-8)
-    
-    # Extraire les patches VIS
+
+    # --- Stride avec overlap (identique au train) ---
+    stride = patch_size_vis[0] - overlap
+
+    # Extraire les patches VIS avec overlap
     vis_patches = tf.image.extract_patches(
         images=vis_gray_norm,
         sizes=[1, patch_size_vis[0], patch_size_vis[1], 1],
-        strides=[1, patch_size_vis[0], patch_size_vis[1], 1],
+        strides=[1, stride, stride, 1],   # ← stride < patch_size, comme en train
         rates=[1, 1, 1, 1],
-        padding='VALID'
+        padding='SAME'                    # ← SAME comme en train
     )
     
     patches_shape = tf.shape(vis_patches)
@@ -63,45 +65,23 @@ def test_step(model,vis_image, ir_image, patch_size_vis):
         return warped[0], flow_pred[0]
     
     warped_patches_batch, flow_fields_batch = tf.map_fn(
-    warp_patch,
-    vis_patches_batch,
-    fn_output_signature=(tf.float32, tf.float32),
-    parallel_iterations=10
+        warp_patch,
+        vis_patches_batch,
+        fn_output_signature=(tf.float32, tf.float32),
+        parallel_iterations=10
     )
-    
-    # Reshape en grille 4D
-    warped_patches_4d = tf.reshape(
+
+    # --- Reconstruction avec moyenne pondérée sur les zones d'overlap ---
+    warped_vis_full = reconstruct_with_overlap(
         warped_patches_batch,
-        [num_patches_h, num_patches_w, patch_size_vis[0], patch_size_vis[1], 1]
+        num_patches_h,
+        num_patches_w,
+        patch_size_vis,
+        stride,
+        ir_h,
+        ir_w
     )
-    
-    # Permuter
-    warped_permuted = tf.transpose(warped_patches_4d, [0, 2, 1, 3, 4])
-    
-    # Reshape final
-    output_h = num_patches_h * patch_size_vis[0]
-    output_w = num_patches_w * patch_size_vis[1]
-    
-    warped_vis_full = tf.reshape(
-        warped_permuted,
-        [1, output_h, output_w, 1]
-    )
-    
-    # Ajustement final pour matcher IR
-    warped_h = tf.shape(warped_vis_full)[1]
-    warped_w = tf.shape(warped_vis_full)[2]
-    
-    if warped_h > ir_h or warped_w > ir_w:
-        warped_vis_full = warped_vis_full[:, :ir_h, :ir_w, :]
-    elif warped_h < ir_h or warped_w < ir_w:
-        pad_h = ir_h - warped_h
-        pad_w = ir_w - warped_w
-        warped_vis_full = tf.pad(
-            warped_vis_full,
-            [[0, 0], [0, pad_h], [0, pad_w], [0, 0]],
-            mode='REFLECT'
-        )
-    
+
     # CALCUL DE TOUTES LES MÉTRIQUES (comme dans train_step)
     
     # 1. NCC Loss
@@ -188,16 +168,12 @@ def test_step(model,vis_image, ir_image, patch_size_vis):
     }
 
 
-
-
-
-
-def visualize_test_results(model,vis_batch, ir_batch, patch_size_ir):
+def visualize_test_results(model, vis_batch, ir_batch, patch_size_ir, overlap=16):
     """
     Fonction complète de visualisation des résultats de test
     """
     # Exécuter le test
-    results = test_step(model,vis_batch, ir_batch, patch_size_ir)
+    results = test_step(model, vis_batch, ir_batch, patch_size_ir, overlap=overlap)
     
     # Créer la figure avec plus de subplots
     fig = plt.figure(figsize=(22, 12))
@@ -262,7 +238,6 @@ def visualize_test_results(model,vis_batch, ir_batch, patch_size_ir):
     # Visualisation du flow field
     ax9 = fig.add_subplot(gs[1, 3])
     flow = results['flow_field'].numpy()
-    # Sous-échantillonner pour la lisibilité
     step = max(1, flow.shape[0] // 20)
     Y, X = np.mgrid[0:flow.shape[0]:step, 0:flow.shape[1]:step]
     U = flow[::step, ::step, 0]
@@ -284,7 +259,6 @@ def visualize_test_results(model,vis_batch, ir_batch, patch_size_ir):
     plt.colorbar(im10, ax=ax10, fraction=0.046, pad=0.04)
     
     # ==================== LIGNE 3: Métriques et statistiques ====================
-    # Texte des métriques
     ax11 = fig.add_subplot(gs[2, :3])
     ax11.axis('off')
     
@@ -305,7 +279,6 @@ def visualize_test_results(model,vis_batch, ir_batch, patch_size_ir):
     ax12.grid(True, alpha=0.3, axis='y')
     ax12.tick_params(axis='x', rotation=45)
     
-    # Ajouter les valeurs sur les barres
     for bar in bars:
         height = bar.get_height()
         ax12.text(bar.get_x() + bar.get_width()/2., height,

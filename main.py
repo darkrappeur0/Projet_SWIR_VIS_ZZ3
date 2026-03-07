@@ -106,7 +106,7 @@ for i, (ir_batch, vis_batch) in enumerate(test_ds.take(3)):  # Tester sur 3 exem
     print(f"  TEST EXEMPLE #{i+1}")
     print(f"{'='*80}\n")
     
-    fig, results = visualize_test_results(model,vis_batch, ir_batch, patch_size_ir)
+    fig, results = visualize_test_results(model,vis_batch, ir_batch, patch_size_ir,overlap=16)
     plt.savefig(f'temp/test_result_{i+1}.png', dpi=150, bbox_inches='tight')
     plt.show()
     
