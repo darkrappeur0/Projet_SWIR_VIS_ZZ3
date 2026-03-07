@@ -36,4 +36,4 @@ def image_generator(file_list_vis, file_list_ir, path_vis, path_infra, patch_siz
             ir_img  = np.array(Image.open(os.path.join(path_infra, ir_name)).convert('L'), dtype=np.float32)/255.0
             ir_img  = np.expand_dims(ir_img, axis=-1)
 
-        yield ir_img, vis_img
+            yield ir_img, vis_img
