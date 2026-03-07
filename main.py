@@ -1,7 +1,7 @@
 
 from config import *
-from setup import *
-
+from src.test import *
+from src.train import *
 
 visible_list, infra_list = LoadData(path_vis, path_infra)
 
