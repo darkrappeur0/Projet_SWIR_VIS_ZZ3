@@ -17,9 +17,11 @@ def stn_warp(image, flow_field):
     x_coords = tf.linspace(-1.0, 1.0, width)
     x_grid, y_grid = tf.meshgrid(x_coords, y_coords)
     
-    flow_x = flow_field[0, :, :, 0] / tf.cast(width, tf.float32) * 2.0
-    flow_y = flow_field[0, :, :, 1] / tf.cast(height, tf.float32) * 2.0
-    
+    # Flow directement en coordonnees normalisees [-1, 1]
+    # Un flow de 0.1 = deplacement de ~43px sur 432 — beaucoup plus facile a apprendre
+    flow_x = flow_field[0, :, :, 0]
+    flow_y = flow_field[0, :, :, 1]
+
     x_new = tf.clip_by_value(x_grid + flow_x, -1.0, 1.0)
     y_new = tf.clip_by_value(y_grid + flow_y, -1.0, 1.0)
     
@@ -50,56 +52,39 @@ def stn_warp(image, flow_field):
     return tf.expand_dims(interpolated, 0)
 
 
-def reconstruct_with_overlap(patches, num_h, num_w, patch_size, stride, target_h, target_w):
-    """
-    Reconstruit l'image en moyennant les zones d'overlap.
-    Utilise tensor_scatter_nd_add pour placer chaque patch directement
-    dans le canvas sans tf.pad — évite les paddings négatifs sur les
-    patches de bordure issus du padding SAME.
-
-    patches    : Tensor (num_h*num_w, patch_h, patch_w, 1)
-    num_h/num_w: int — nombre de patches en hauteur / largeur
-    patch_size : tuple (patch_h, patch_w)
-    stride     : int — stride utilisé lors de extract_patches
-    target_h/w : int — dimensions de l'image de sortie
-    """
-    # Canvas et weight map à plat sur (H*W, 1) pour scatter
-    canvas     = tf.zeros([target_h * target_w, 1])
-    weight_map = tf.zeros([target_h * target_w, 1])
-
-    for i in tf.range(num_h):
-        for j in tf.range(num_w):
-            idx = i * num_w + j
-
+def _reconstruct_np(patches_np, num_h, num_w, patch_h, patch_w,
+                    stride, target_h, target_w):
+    canvas  = np.zeros((target_h, target_w, 1), dtype=np.float32)
+    weights = np.zeros((target_h, target_w, 1), dtype=np.float32)
+    for i in range(num_h):
+        for j in range(num_w):
+            idx     = i * num_w + j
             y_start = i * stride
             x_start = j * stride
-            y_end   = tf.minimum(y_start + patch_size[0], target_h)
-            x_end   = tf.minimum(x_start + patch_size[1], target_w)
-
-            # Taille réelle de la zone valide dans le canvas
-            ph = y_end - y_start   # peut être < patch_size sur les bords
-            pw = x_end - x_start
-
-            # Ne garder que la partie valide du patch
-            patch_crop = patches[idx, :ph, :pw, :]   # (ph, pw, 1)
-
-            # Construire les indices 1-D (y*W + x) pour chaque pixel du patch
-            ys = tf.range(y_start, y_end)             # (ph,)
-            xs = tf.range(x_start, x_end)             # (pw,)
-            grid_y, grid_x = tf.meshgrid(ys, xs, indexing='ij')   # (ph, pw)
-            flat_indices = tf.reshape(grid_y * target_w + grid_x, [-1, 1])  # (ph*pw, 1)
-
-            patch_flat  = tf.reshape(patch_crop, [-1, 1])          # (ph*pw, 1)
-            ones_flat   = tf.ones_like(patch_flat)
-
-            canvas     = tf.tensor_scatter_nd_add(canvas,     flat_indices, patch_flat)
-            weight_map = tf.tensor_scatter_nd_add(weight_map, flat_indices, ones_flat)
-
-    output = canvas / (weight_map + 1e-8)
-    return tf.reshape(output, [1, target_h, target_w, 1])
+            y_end   = min(y_start + patch_h, target_h)
+            x_end   = min(x_start + patch_w, target_w)
+            ph      = y_end - y_start
+            pw      = x_end - x_start
+            canvas [y_start:y_end, x_start:x_end, :] += patches_np[idx, :ph, :pw, :]
+            weights[y_start:y_end, x_start:x_end, :] += 1.0
+    return (canvas / (weights + 1e-8))[np.newaxis].astype(np.float32)
 
 
-@tf.function
+def reconstruct_with_overlap(patches, num_h, num_w, patch_size,
+                              stride, target_h, target_w):
+    result = tf.numpy_function(
+        func=lambda p, nh, nw, ph, pw, s, th, tw: _reconstruct_np(
+            p, int(nh), int(nw), int(ph), int(pw), int(s), int(th), int(tw)
+        ),
+        inp=[patches, num_h, num_w,
+             patch_size[0], patch_size[1],
+             stride, target_h, target_w],
+        Tout=tf.float32
+    )
+    result = tf.ensure_shape(result, [1, None, None, 1])
+    return result
+
+
 def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16):
     """
     Train step 
@@ -139,19 +124,32 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
             [total_patches, patch_size_vis[0], patch_size_vis[1], 1]
         )
         
-        # Warper les patches
-        def warp_patch(patch):
-            patch = tf.expand_dims(patch, axis=0)
-            flow_pred = model(patch, training=True)
-            warped = stn_warp(patch, flow_pred)
-            return warped[0], flow_pred[0]
-        
-        warped_patches_batch, flow_fields_batch = tf.map_fn(
-            warp_patch,
-            vis_patches_batch,
-            fn_output_signature=(tf.float32, tf.float32),
-            parallel_iterations=10
+        # Extraire les patches IR correspondants
+        ir_patches = tf.image.extract_patches(
+            images=ir_gray_norm,
+            sizes=[1, patch_size_vis[0], patch_size_vis[1], 1],
+            strides=[1, stride, stride, 1],
+            rates=[1, 1, 1, 1],
+            padding='SAME'
         )
+        ir_patches_batch = tf.reshape(
+            ir_patches,
+            [total_patches, patch_size_vis[0], patch_size_vis[1], 1]
+        )
+
+        # Warper les patches — le modele voit VIS + IR pour estimer le flow
+        warped_list = []
+        flow_list   = []
+        for vis_patch, ir_patch in zip(tf.unstack(vis_patches_batch, axis=0),
+                                        tf.unstack(ir_patches_batch,  axis=0)):
+            vis_in    = tf.expand_dims(vis_patch, axis=0)
+            ir_in     = tf.expand_dims(ir_patch,  axis=0)
+            flow_pred = model([vis_in, ir_in], training=True)
+            warped    = stn_warp(vis_in, flow_pred)
+            warped_list.append(warped[0])
+            flow_list.append(flow_pred[0])
+        warped_patches_batch = tf.stack(warped_list, axis=0)
+        flow_fields_batch    = tf.stack(flow_list,   axis=0)
         
         # Reconstruction corrigée
         warped_vis_full = reconstruct_with_overlap(
@@ -186,12 +184,17 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
         bin_loss = binary_loss(warped_vis_full, ir_gray_norm)
         
         # Loss totale
+        # Normaliser bin_loss et sobel_loss pour eviter qu ils explosent
+        # bin_loss ~6-7 normalement -> on la ramene dans le meme ordre que les autres
+        bin_loss_norm   = bin_loss   / (tf.stop_gradient(bin_loss)   + 1e-8)
+        sobel_loss_norm = sobel_loss / (tf.stop_gradient(sobel_loss) + 1e-8)
+
         total_loss = (
-            0.4 * ncc        +   # Alignement global
-            0.3 * grad_loss  +   # Alignement des structures
-            0.1 * sobel_loss +   # Edges
-            0.1 * bin_loss   +   # Binarisation
-            0.1 * smooth_loss    # Régularisation
+            0.40 * ncc             +   # Alignement global multimodal
+            0.30 * grad_loss       +   # Alignement des structures
+            0.15 * sobel_loss_norm +   # Edges pixel a pixel (normalise -> toujours ~1.0)
+            0.10 * bin_loss_norm   +   # Binarisation pixel a pixel (normalise -> toujours ~1.0)
+            0.05 * smooth_loss         # Regularisation flow
         )
         
         grads, _ = tf.clip_by_global_norm(
@@ -200,10 +203,3 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
         
         return total_loss
-    
-
-#rgb -> infra rouge + potentiellement rajouté un mask
-#loss binaire / binariser les images
-#aller vers la taille du swir modifier pour prendre la même info du côté swir et vis.
-
-

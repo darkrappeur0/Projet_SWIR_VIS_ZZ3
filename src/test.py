@@ -6,7 +6,6 @@ from .neuronnes import *
 from .train import stn_warp, reconstruct_with_overlap
 
 
-@tf.function
 def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     """
     Test step avec overlap identique au train_step
@@ -57,21 +56,34 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
         [total_patches, patch_size_vis[0], patch_size_vis[1], 1]
     )
     
-    # Warper tous les patches (SANS training) et collecter les flows
-    def warp_patch(patch):
-        patch = tf.expand_dims(patch, axis=0)
-        flow_pred = model(patch, training=False)
-        warped = stn_warp(patch, flow_pred)
-        return warped[0], flow_pred[0]
-    
-    warped_patches_batch, flow_fields_batch = tf.map_fn(
-        warp_patch,
-        vis_patches_batch,
-        fn_output_signature=(tf.float32, tf.float32),
-        parallel_iterations=10
+    # Extraire les patches IR correspondants
+    ir_patches = tf.image.extract_patches(
+        images=ir_gray_norm,
+        sizes=[1, patch_size_vis[0], patch_size_vis[1], 1],
+        strides=[1, stride, stride, 1],
+        rates=[1, 1, 1, 1],
+        padding='SAME'
+    )
+    ir_patches_batch = tf.reshape(
+        ir_patches,
+        [total_patches, patch_size_vis[0], patch_size_vis[1], 1]
     )
 
-    # --- Reconstruction avec moyenne pondérée sur les zones d'overlap ---
+    # Warper tous les patches (SANS training) — modele voit VIS + IR
+    warped_list = []
+    flow_list   = []
+    for vis_patch, ir_patch in zip(tf.unstack(vis_patches_batch, axis=0),
+                                    tf.unstack(ir_patches_batch,  axis=0)):
+        vis_in    = tf.expand_dims(vis_patch, axis=0)
+        ir_in     = tf.expand_dims(ir_patch,  axis=0)
+        flow_pred = model([vis_in, ir_in], training=False)
+        warped    = stn_warp(vis_in, flow_pred)
+        warped_list.append(warped[0])
+        flow_list.append(flow_pred[0])
+    warped_patches_batch = tf.stack(warped_list, axis=0)
+    flow_fields_batch    = tf.stack(flow_list,   axis=0)
+
+    # --- Reconstruction avec moyenne pondérée (même fonction que train) ---
     warped_vis_full = reconstruct_with_overlap(
         warped_patches_batch,
         num_patches_h,
@@ -106,12 +118,15 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     smooth_loss = smoothness_loss(flow_fields_4d)
     
     # Loss totale (même pondération que training)
+    bin_loss_norm   = bin_loss   / (tf.stop_gradient(bin_loss)   + 1e-8)
+    sobel_loss_norm = sobel_loss / (tf.stop_gradient(sobel_loss) + 1e-8)
+
     total_loss = (
-        0.4 * ncc +
-        0.3 * grad_loss +
-        0.1 * sobel_loss +
-        0.1 * bin_loss +
-        0.1 * smooth_loss
+        0.40 * ncc             +
+        0.30 * grad_loss       +
+        0.15 * sobel_loss_norm +
+        0.10 * bin_loss_norm   +
+        0.05 * smooth_loss
     )
     
     # MÉTRIQUES SUPPLÉMENTAIRES POUR ANALYSE
