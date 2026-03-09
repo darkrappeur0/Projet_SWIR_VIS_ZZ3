@@ -53,7 +53,7 @@ def UNetCompiled(input_size=(432, 432, 1), n_filters=32, n_classes=2):
     conv9  = Conv2D(n_filters, 3, activation='relu', padding='same',
                     kernel_initializer='he_normal')(ublock9)
     conv10 = Conv2D(n_classes, 1, padding='same',
-                    kernel_initializer='zeros',
+                    kernel_initializer='glorot_uniform',
                     bias_initializer='zeros',
                     name='flow_output')(conv9)
 
