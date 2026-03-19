@@ -9,7 +9,7 @@ path_infra = "datas/temp/swir/"
 n_filters = 32
 n_classes = 2
 batch_size = 1
-epochs = 20
+epochs = 1
 learning_rate = 3e-4
 
 

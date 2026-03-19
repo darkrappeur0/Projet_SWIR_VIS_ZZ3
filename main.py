@@ -53,6 +53,7 @@ early_stop = EarlyStopping(monitor='loss', patience=10)
 
 import time
 
+start = time.time()
 for epoch in range(epochs):
     print(f"\nEpoch {epoch+1}/{epochs}")
     epoch_loss   = 0
@@ -81,7 +82,13 @@ for epoch in range(epochs):
     # Sauvegarder le modele apres chaque epoch
     model.save("unet_stn_deformation.h5")
 
+print("\n")
+end = time.time()
 
+elapse = end - start
+
+print("temps des résultats en secondes :\n")
+print(elapse)
 print("\nAnalyse des resultats de test...\n")
 
 for i, (ir_batch, vis_batch) in enumerate(test_ds.take(3)):

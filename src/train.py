@@ -50,53 +50,6 @@ def stn_warp(image, flow_field):
     return tf.expand_dims(interpolated, 0)
 
 
-def _gaussian_window_np(patch_h, patch_w):
-    """Fenêtre gaussienne 2D pour la reconstruction par overlap-add."""
-    y = np.linspace(-1.0, 1.0, patch_h)
-    x = np.linspace(-1.0, 1.0, patch_w)
-    xx, yy = np.meshgrid(x, y)
-    window = np.exp(-(xx**2 + yy**2) / (2 * 0.5**2))
-    return (window / window.max())[:, :, np.newaxis].astype(np.float32)
-
-
-def _reconstruct_np(patches_np, num_h, num_w, patch_h, patch_w,
-                    stride, target_h, target_w):
-    """Reconstruction avec pondération gaussienne."""
-    window  = _gaussian_window_np(patch_h, patch_w)
-    canvas  = np.zeros((target_h, target_w, 1), dtype=np.float32)
-    weights = np.zeros((target_h, target_w, 1), dtype=np.float32)
-
-    for i in range(num_h):
-        for j in range(num_w):
-            idx     = i * num_w + j
-            y_start = i * stride
-            x_start = j * stride
-            y_end   = min(y_start + patch_h, target_h)
-            x_end   = min(x_start + patch_w, target_w)
-            ph      = y_end - y_start
-            pw      = x_end - x_start
-
-            canvas [y_start:y_end, x_start:x_end, :] += patches_np[idx, :ph, :pw, :] * window[:ph, :pw, :]
-            weights[y_start:y_end, x_start:x_end, :] += window[:ph, :pw, :]
-
-    return (canvas / (weights + 1e-8))[np.newaxis].astype(np.float32)
-
-
-def reconstruct_with_overlap(patches, num_h, num_w, patch_size,
-                              stride, target_h, target_w):
-    result = tf.numpy_function(
-        func=lambda p, nh, nw, ph, pw, s, th, tw: _reconstruct_np(
-            p, int(nh), int(nw), int(ph), int(pw), int(s), int(th), int(tw)
-        ),
-        inp=[patches, num_h, num_w,
-             patch_size[0], patch_size[1],
-             stride, target_h, target_w],
-        Tout=tf.float32
-    )
-    result = tf.ensure_shape(result, [1, None, None, 1])
-    return result
-
-
 def extract_patches_valid(image_norm, patch_h, patch_w, stride):
     """
     Extrait les patches en mode VALID : aucun zero-padding.
@@ -191,7 +144,7 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
         total_loss = (
             0.55 * ncc         +
             0.35 * grad_loss_v +
-            0.10 * smooth_loss
+            0.10 * smooth_loss 
         )
 
         grads, _ = tf.clip_by_global_norm(
