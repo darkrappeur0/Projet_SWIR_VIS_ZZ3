@@ -109,7 +109,7 @@ for i, (ir_batch, vis_batch) in enumerate(test_ds.take(3)):
     print(f"{'='*80}\n")
 
     fig, results = visualize_test_results(model, vis_batch, ir_batch, patch_size_ir)
-    plt.savefig(f'temp/test_result_{i+1}.png', dpi=150, bbox_inches='tight')
+    plt.savefig(f'resultat/test_result_{i+1}.png', dpi=150, bbox_inches='tight')
     plt.show()
 
     print(f"Total Loss : {results['total_loss'].numpy():.6f}")
