@@ -1,10 +1,16 @@
-Pour effectuer le run : 
+Pour setup l'environnement :
 
 source venv/bin/activate
 
 pip install -r requirements.txt
 
+Pour effectuer le run :
+
 python main.py
+
+Pour sortir de l'environnement : 
+deactivate 
+
 
 Pour modifier les époques aller dans config.py et modifier epochs.
 
