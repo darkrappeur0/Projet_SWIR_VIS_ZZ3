@@ -5,6 +5,17 @@ from .neuronnes import *
 
 from .train import stn_warp, extract_patches_valid
 
+"""
+
+Fichier pour la définition de la boucle de test
+
+"""
+
+"""
+
+Début des fonctions de reconstructions par patches
+
+"""
 def _gaussian_window_np(patch_h, patch_w):
     """Fenêtre gaussienne 2D pour la reconstruction par overlap-add."""
     y = np.linspace(-1.0, 1.0, patch_h)
@@ -52,7 +63,11 @@ def reconstruct_with_overlap(patches, num_h, num_w, patch_size,
     return result
 
 
+"""
 
+Fin des fonctions de reconstructions par patches
+
+"""
 def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     """
     Test step cohérent avec train_step (padding VALID).
@@ -73,7 +88,7 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     patch_h = patch_size_vis[0]
     patch_w = patch_size_vis[1]
 
-    # Même extraction VALID que dans train_step
+    # Extraction des patches
     vis_patches_batch, num_patches_h, num_patches_w = extract_patches_valid(
         vis_gray_norm, patch_h, patch_w, stride
     )
@@ -81,6 +96,7 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
         ir_gray_norm, patch_h, patch_w, stride
     )
 
+    #Calcul du déplacement fait par le modèle
     warped_list = []
     flow_list   = []
     for vis_patch, ir_patch in zip(tf.unstack(vis_patches_batch, axis=0),
@@ -95,8 +111,7 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     warped_patches_batch = tf.stack(warped_list, axis=0)
     flow_fields_batch    = tf.stack(flow_list,   axis=0)
 
-    # Reconstruction — la zone couverte par VALID est plus petite que l'image
-    # On calcule target_h/w à partir du nombre de patches et du stride
+    # Reconstruction 
     valid_h = (num_patches_h - 1) * stride + patch_h
     valid_w = (num_patches_w - 1) * stride + patch_w
 
@@ -110,7 +125,7 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     # Recadrer ir_gray_norm à la même taille pour les métriques
     ir_gray_crop = ir_gray_norm[:, :valid_h, :valid_w, :]
 
-    # --- Métriques ---
+    # Calcul des métriques
     ncc       = ncc_loss(warped_vis_full, ir_gray_crop)
     grad_loss = gradient_loss(warped_vis_full, ir_gray_crop)
 
@@ -168,6 +183,11 @@ def test_step(model, vis_image, ir_image, patch_size_vis, overlap=16):
     }
 
 
+"""
+
+Fonctions d'affichage des résultats avec les métriques calculés
+
+"""
 def visualize_test_results(model, vis_batch, ir_batch, patch_size_ir, overlap=16):
     """Visualisation complète des résultats de test."""
     results = test_step(model, vis_batch, ir_batch, patch_size_ir, overlap=overlap)

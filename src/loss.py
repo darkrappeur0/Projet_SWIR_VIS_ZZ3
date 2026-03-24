@@ -1,5 +1,13 @@
 from .setup_import import *
 
+"""
+
+Fonctions principales pour le calcul des fonctions de pertes
+
+"""
+
+
+
 def sobel_for_loss_ir(img):
     """
     img: Tensor [B, H, W, C] (float32, normalisé)
@@ -18,6 +26,7 @@ def sobel_for_loss_ir(img):
 def ncc_loss(img1, img2):
     """
     Normalized Cross-Correlation loss 
+    Permet de comparer les différentes zones des l'image
     """
     # Normaliser les images
     img1_mean = tf.reduce_mean(img1)
@@ -39,6 +48,7 @@ def ncc_loss(img1, img2):
 def gradient_loss(img1, img2):
     """
     Loss sur les gradients
+    permet de comparer les différents bords des l'images
     """
     # Gradients en x et y
     def compute_gradients(img):
@@ -68,6 +78,7 @@ def gradient_loss(img1, img2):
 def smoothness_loss(flow_field):
     """
     Régularisation pour un flow plus lisse
+    Permet d'éviter que le modèle génère trop de bruit
     """
     # Calculer les différences entre pixels voisins
     dx = flow_field[:, :, 1:, :] - flow_field[:, :, :-1, :]
@@ -86,8 +97,10 @@ def binarize_image(image, threshold=0.5):
 
 def binary_loss(pred, target):
     """
+    
     Loss binaire entre deux images binarisées
-    S'assure que pred et target ont la même forme
+    Ancienne fonction de perte, sert désormais uniquement dans les métriques affichés dans la fonction d'affichage du résultat
+
     """
     # S'assurer que les deux images ont la même taille
     if tf.shape(pred)[1] != tf.shape(target)[1] or tf.shape(pred)[2] != tf.shape(target)[2]:

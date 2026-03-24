@@ -1,11 +1,21 @@
+
+#pour les différents calcul / prise de temps / fonction de load
 import os
-# for visualizations
+import numpy as np 
+import time
+
+
+
+#pour l'affichage et traitée les images
 import matplotlib.pyplot as plt
 from PIL import Image
-import numpy as np # for using np arrays
-import cv2
-import time
-# for bulding and running deep learning model
+
+
+
+
+
+
+#pour le modèle
 import tensorflow as tf
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Conv2D
@@ -19,3 +29,4 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.callbacks import ModelCheckpoint,EarlyStopping
 from sklearn.model_selection import train_test_split
+import cv2

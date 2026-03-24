@@ -1,7 +1,11 @@
 
 from .setup_import import *
 
+"""
 
+    Fichier pour charger les images et générer les images
+
+"""
 def LoadData (path1, path2):
     """
     Looks for relevant filenames in the shared path

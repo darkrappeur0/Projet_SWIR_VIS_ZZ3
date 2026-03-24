@@ -1,5 +1,10 @@
 from .setup_import import *
+"""
 
+Fichier pour effectuer le découpage de la scène visible pour avoir une scène similaire à l'infra rouge
+Pour l'instant ne marche pas
+
+"""
 def content_based_crop_with_features(vis_image, ir_image, debug=False, min_matches=10):
     
     vis_np = vis_image.numpy()[0]
@@ -61,14 +66,9 @@ def content_based_crop_with_features(vis_image, ir_image, debug=False, min_match
     pts_vis = np.float32([kp_vis[m.queryIdx].pt for m in good_matches])
     pts_ir = np.float32([kp_ir[m.trainIdx].pt for m in good_matches])
     
-    # CORRECTION: Le problème est ici !
-    # pts_vis contient les coordonnées dans VIS (grande image)
-    # pts_ir contient les coordonnées dans IR (petite image)
-    # On veut trouver où se trouve la zone IR dans VIS
     
     try:
-        # Utiliser findHomography plutôt que estimateAffinePartial2D
-        # pour mieux gérer les différences de taille
+        
         H_matrix, mask = cv2.findHomography(pts_ir, pts_vis, cv2.RANSAC, 5.0)
         
         if H_matrix is None:
@@ -78,11 +78,11 @@ def content_based_crop_with_features(vis_image, ir_image, debug=False, min_match
             offset_h = int(np.clip(offset[1], 0, vis_h - ir_h))
             offset_w = int(np.clip(offset[0], 0, vis_w - ir_w))
         else:
-            # Trouver où les coins de IR se projettent dans VIS
+            #calcul des différents points importants de la scène bords offset, inliners
             ir_corners = np.float32([[0, 0], [ir_w, 0], [ir_w, ir_h], [0, ir_h]]).reshape(-1, 1, 2)
             vis_corners = cv2.perspectiveTransform(ir_corners, H_matrix)
             
-            # Calculer la bounding box dans VIS
+            
             x_min = int(np.min(vis_corners[:, 0, 0]))
             y_min = int(np.min(vis_corners[:, 0, 1]))
             

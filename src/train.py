@@ -3,10 +3,17 @@ from .loss import *
 from .load_data import *
 from .neuronnes import *
 
+"""
+Fichier de définition de la boucle d'entrainement.
+"""
+
+
+
+
 @tf.function
 def stn_warp(image, flow_field):
     """
-    Warping bilinéaire classique.
+    Warping afin d'appliquer le champ de déformation du modèle U_net
     Les pixels hors-champ après déplacement sont clampés au bord (STN standard).
     """
     height = tf.shape(image)[1]
@@ -52,16 +59,14 @@ def stn_warp(image, flow_field):
 
 def extract_patches_valid(image_norm, patch_h, patch_w, stride):
     """
-    Extrait les patches en mode VALID : aucun zero-padding.
-    Tous les pixels des patches proviennent de l'image réelle.
-    C'est la correction principale contre les bandes/cadres gris.
+    Fonctions d'extration des différents patches de l'image.
     """
     patches = tf.image.extract_patches(
         images=image_norm,
         sizes=[1, patch_h, patch_w, 1],
         strides=[1, stride, stride, 1],
         rates=[1, 1, 1, 1],
-        padding='VALID'  # <-- pas de zero-padding
+        padding='VALID'  # évite l'appartion des bords gris/noir du au padding
     )
     patches_shape = tf.shape(patches)
     num_h = patches_shape[1]
@@ -73,13 +78,7 @@ def extract_patches_valid(image_norm, patch_h, patch_w, stride):
 
 def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16):
     """
-    Train step.
-
-    Corrections vs versions précédentes :
-      1. padding='VALID' dans extract_patches  →  plus de zero-padding sur les bords
-         => plus de bandes/cadres gris dans l'image warpée.
-      2. binary_loss retirée (valeur ~5-6, dominait toute la loss).
-      3. Poids : NCC 55 %, gradient 35 %, smoothness 10 %.
+    Fonction du train step
     """
     with tf.GradientTape() as tape:
 
@@ -95,6 +94,7 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
         vis_gray_norm = (vis_gray - tf.reduce_mean(vis_gray)) / (tf.math.reduce_std(vis_gray) + 1e-8)
         ir_gray_norm  = (ir_gray  - tf.reduce_mean(ir_gray))  / (tf.math.reduce_std(ir_gray)  + 1e-8)
 
+        #Calcul des patches
         stride  = patch_size_vis[0] - overlap
         patch_h = patch_size_vis[0]
         patch_w = patch_size_vis[1]
@@ -106,6 +106,8 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
             ir_gray_norm, patch_h, patch_w, stride
         )
 
+
+        #Calcul de la prédiction du modèle
         warped_list = []
         flow_list   = []
         for vis_patch, ir_patch in zip(tf.unstack(vis_patches_batch, axis=0),
@@ -119,7 +121,9 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
 
         warped_patches_batch = tf.stack(warped_list, axis=0)
         flow_fields_batch    = tf.stack(flow_list,   axis=0)
+        
 
+        #Calcul des différentes fonctions de perte du sytème
         ncc_list    = []
         grad_list   = []
         smooth_list = []
@@ -141,12 +145,14 @@ def train_step(model, optimizer, vis_image, ir_image, patch_size_vis, overlap=16
         grad_loss_v = tf.reduce_mean(tf.stack(grad_list))
         smooth_loss = tf.reduce_mean(tf.stack(smooth_list))
 
+        #calcul de la loss total
         total_loss = (
             0.55 * ncc         +
             0.35 * grad_loss_v +
             0.10 * smooth_loss 
         )
-
+        
+        #backward optimisation
         grads, _ = tf.clip_by_global_norm(
             tape.gradient(total_loss, model.trainable_variables), 1.0
         )

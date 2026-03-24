@@ -2,14 +2,19 @@ from config import *
 from src.test import *
 from src.train import *
 
+
+"""
+
+Fichiers principale de l'algorithme U_Net
+
+"""
 visible_list, infra_list = LoadData(path_vis, path_infra)
 
 # Patch sizes comme tuples Python — requis par tf.image.extract_patches
 # (sizes doit etre une constante Python, pas un tenseur)
-patch_size_vis = (512, 512)
-patch_size_ir  = (432, 432)
 
 
+#Setup du modèle et des optimiseurs
 model = UNetCompiled(
     input_size=(432, 432, 1),  # taille d un patch (H, W, 1) — x2 en entree (VIS+IR)
     n_filters=n_filters,
@@ -22,6 +27,7 @@ mse_loss  = MeanSquaredError()
 optimizer = Adam(learning_rate=learning_rate)
 
 
+#Setup des base de donées pour l'entrainement et l'évaluation
 vis_train, vis_test, ir_train, ir_test = train_test_split(
     visible_list, infra_list, test_size=0.2, random_state=42, shuffle=True
 )
@@ -51,6 +57,8 @@ test_ds = test_ds.batch(1)
 checkpoint = ModelCheckpoint("unet_stn_deformation.h5", save_best_only=True, monitor='loss')
 early_stop = EarlyStopping(monitor='loss', patience=10)
 
+
+#Début de la boucle d'entrainement
 import time
 
 start = time.time()
@@ -88,9 +96,12 @@ end = time.time()
 elapse = end - start
 
 print("temps des résultats en secondes :\n")
-print(elapse)
+print(elapse) # pour avoir le temps global en secondes de la boucle d'entrainement
 print("\nAnalyse des resultats de test...\n")
 
+#fin de la boucle d'entrainement
+
+#Début de la boucle d'évalutation / test
 for i, (ir_batch, vis_batch) in enumerate(test_ds.take(3)):
 
     print(f"\n{'='*80}")
@@ -108,4 +119,3 @@ for i, (ir_batch, vis_batch) in enumerate(test_ds.take(3)):
           f"max={results['max_flow_magnitude'].numpy():.2f}px")
  
 
-#mettre un patch qui respecte le ratio de l'image 

@@ -1,7 +1,17 @@
 from .setup_import import *
 
+"""
 
+Fichier pour la déclaration du modèle U_Net.
+Pris et modifiée d'un repo en ligne à accès publique sur github
+
+"""
 def EncoderMiniBlock(inputs, n_filters=32, dropout_prob=0.3, max_pooling=True):
+    """
+
+    Fonction pour définir un bloc d'encodeur
+
+    """
     conv = Conv2D(n_filters, 3, activation='relu', padding='same',
                   kernel_initializer='HeNormal')(inputs)
     conv = Conv2D(n_filters, 3, activation='relu', padding='same',
@@ -14,6 +24,11 @@ def EncoderMiniBlock(inputs, n_filters=32, dropout_prob=0.3, max_pooling=True):
 
 
 def DecoderMiniBlock(prev_layer_input, skip_layer_input, n_filters=32):
+    """
+
+    Fonction pour définir un bloc de decodeur
+
+    """
     up = Conv2DTranspose(n_filters, (3, 3), strides=(2, 2), padding='same')(prev_layer_input)
     merge = concatenate([up, skip_layer_input], axis=3)
     conv = Conv2D(n_filters, 3, activation='relu', padding='same',
